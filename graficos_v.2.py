@@ -4,42 +4,72 @@ import numpy as np
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-# 1) Cargar todas las hojas
-xls = pd.read_excel("Resultados LLM.xlsx", sheet_name=None)  # dict {hoja: DataFrame}
 
-# 2) Quitar las hojas que no quieres
-excluded = {"Transcripciones", "Expertos"}
+def handle_plots(plot_funcs, show=True, save=False, prefix="plot"):
+    """
+    Ejecuta una lista de funciones que devuelven figuras y las muestra/guarda.
+
+    Parameters
+    ----------
+    plot_funcs : list of callables
+        Cada función debe devolver un objeto matplotlib.figure.Figure
+    show : bool
+        Si True, se muestran las figuras
+    save : bool
+        Si True, se guardan como PNG
+    prefix : str
+        Prefijo para los archivos PNG
+    """
+    figures = []
+
+    for func in plot_funcs:
+        fig = func()
+        if fig is not None:
+            figures.append(fig)
+
+    if save:
+        for i, fig in enumerate(figures, 1):
+            filename = f"{prefix}_{i}.png"
+            fig.savefig(filename, dpi=300, bbox_inches="tight")
+            print(f"✅ Guardado: {filename}")
+
+    if show:
+        for fig in figures:
+            plt.figure(fig.number)
+        plt.show()
+
+
+# ----------------- Cargar y procesar datos -----------------
+xls = pd.read_excel("Resultados LLM.xlsx", sheet_name=None)
+excluded = {"Transcripciones"}
 sheet_names = [name for name in xls.keys() if name not in excluded]
 
-# 3) Serie con promedios de expertos (asegúrate que la hoja Expertos existe)
 if "Expertos" not in xls:
     raise ValueError("No se encontró la hoja 'Expertos' en el archivo.")
 df_expertos = xls["Expertos"]
-promedios_expertos = df_expertos[["A","B","C","D","E"]].mean(axis=0)  # Series con índice A..E
+promedios_expertos = df_expertos[["A","B","C","D","E"]].mean(axis=0)
 
-# Regex para extraer: modelo, prompt y optional _json
-# Ejemplos que captura: "ChatGPT_p1", "Gemini_p2_json", "Llama_p10_json"
 pattern = re.compile(r'^\s*(?P<model>.+?)_p(?P<prompt>\d+)(?:_(?P<json>json))?\s*$', flags=re.IGNORECASE)
 
 def process_sheet(df):
-    """Devuelve una Serie con índices A..E (prom_p1) o None si no hay suficientes datos."""
     cols_p1 = [c for c in ["A","B","C","D","E"] if c in df.columns]
     prom_p1 = None
     if len(cols_p1) == 5:
         prom_p1 = df[cols_p1].mean(axis=0)
-    elif df.shape[1] >= 5:  # fallback por posición
+    elif df.shape[1] >= 5:
         prom_p1 = df.iloc[:, 0:5].mean(axis=0)
         prom_p1.index = ["A","B","C","D","E"]
     return prom_p1
 
 frames = []
 skipped_sheets = []
-parsed_info = []  # para mostrar qué se interpretó
+parsed_info = []
+prompts_seen = set()
+json_seen = set()
 
 for sheet in sheet_names:
     m = pattern.match(sheet)
     if not m:
-        # si el nombre no sigue el patrón, lo saltamos (o podrías intentar un parse más laxo)
         skipped_sheets.append(sheet)
         continue
 
@@ -47,109 +77,106 @@ for sheet in sheet_names:
     prompt_num = m.group("prompt")
     json_flag = bool(m.group("json"))
 
-    # procesar hoja
+    prompts_seen.add(prompt_num)
+    json_seen.add("json" if json_flag else "no_json")
+
     df_sheet = xls[sheet]
     prom1 = process_sheet(df_sheet)
     if prom1 is None:
         skipped_sheets.append(sheet)
         continue
 
-    # crear DF temporal con la info extraída
     df_temp = pd.DataFrame({
         "Categoria": prom1.index,
         "Promedio": prom1.values,
         "Expertos": promedios_expertos.reindex(prom1.index).values,
         "LLM": model,
         "Prompt": prompt_num,
-        "JSON": json_flag
+        "JSON": "json" if json_flag else "no_json"
     })
     frames.append(df_temp)
     parsed_info.append((sheet, model, prompt_num, json_flag))
 
-# Concatenar resultados (si hay)
-if frames:
-    df_final = pd.concat(frames, ignore_index=True).dropna(subset=["Promedio","Expertos"])
-else:
-    df_final = pd.DataFrame(columns=["Categoria","Promedio","Expertos","LLM","Prompt","JSON"])
-
-# Informes de verificación
-print("Hojas procesadas (con parse aplicado):")
-for info in parsed_info:
-    print("  - hoja:", info[0], "=> model:", info[1], "prompt:", info[2], "json:", info[3])
-
-if skipped_sheets:
-    print("\nHojas saltadas (no coincidieron con el patrón o faltan columnas):")
-    for s in skipped_sheets:
-        print("  -", s)
-
-print("\nData final (primeras filas):")
-print(df_final.head())
-
-print("\nEstadísticas generales:")
-print("Media Promedio:", df_final["Promedio"].mean())
-print("Media Expertos:", df_final["Expertos"].mean())
-
-# --- Preparación / limpieza adicional para graficar ---
-# Asegurarnos de que Categoria tenga el orden correcto
+# Añadir Expertos replicado
 ordered_cats = ["A","B","C","D","E"]
+proms = promedios_expertos.reindex(ordered_cats).fillna(np.nan)
+if not prompts_seen:
+    prompts_seen = {"0"}
+if not json_seen:
+    json_seen = {"no_json"}
+
+for p in sorted(prompts_seen, key=lambda x: int(x) if str(x).isdigit() else x):
+    for j in sorted(json_seen):
+        df_experts_rep = pd.DataFrame({
+            "Categoria": proms.index,
+            "Promedio": proms.values,
+            "Expertos": proms.values,
+            "LLM": "Expertos",
+            "Prompt": p,
+            "JSON": j
+        })
+        frames.append(df_experts_rep)
+parsed_info.append(("Expertos_replicado", "Expertos", ",".join(sorted(prompts_seen)), ",".join(sorted(json_seen))))
+
+df_final = pd.concat(frames, ignore_index=True).dropna(subset=["Promedio"]) if frames else pd.DataFrame(columns=["Categoria","Promedio","Expertos","LLM","Prompt","JSON"])
 df_final["Categoria"] = pd.Categorical(df_final["Categoria"], categories=ordered_cats, ordered=True)
 
-# Convertir Prompt a entero (si es posible) para facilitar orden y tamaño
-try:
-    df_final["Prompt"] = df_final["Prompt"].astype(int)
-except:
-    # si hay valores no convertibles, dejar como string
-    df_final["Prompt"] = df_final["Prompt"].astype(str)
+def safe_int_convert(col):
+    try:
+        return col.astype(int)
+    except:
+        return pd.Categorical(col).codes + 1
 
-# Normalizar la columna JSON a etiquetas legibles
-df_final["JSON"] = df_final["JSON"].map({True: "json", False: "no_json"}).fillna("no_json")
+df_final["Prompt_orig"] = df_final["Prompt"]
+df_final["Prompt"] = safe_int_convert(df_final["Prompt"].astype(str))
+df_final["JSON"] = df_final["JSON"].fillna("no_json")
 
-# Mostrar conteos rápidos para verificar
-print("Conteo por Prompt y JSON:\n", df_final.groupby(["Prompt","JSON"]).size())
+# ----------------- Funciones para crear gráficos ---ARIEL SOLO AGREGA LOS GRAFICOS AQUI -----------------
+def grafico1():
+    g = sns.catplot(
+        data=df_final,
+        x="Categoria", y="Promedio",
+        hue="LLM",
+        col="Prompt", row="JSON",
+        kind="point",
+        dodge=True,
+        height=4, aspect=1,
+        order=ordered_cats
+    )
+    g.fig.subplots_adjust(top=0.92)
+    g.fig.suptitle("Promedio por Categoría — Prompt (col) y JSON (row)")
+    g.set(ylim=(0,5))
+    return g.fig
 
-# ----------------- GRAFICO 1: catplot por Prompt (columnas) y JSON (filas) -----------------
-# Usar col_wrap por si hay muchos prompts, evita que se estire demasiado horizontalmente
-n_prompts = df_final["Prompt"].nunique()
-col_wrap = 4 if n_prompts > 4 else n_prompts
+def grafico2():
+    fig, ax = plt.subplots(figsize=(10, 6))
+    sns.scatterplot(
+        data=df_final,
+        x="Promedio", y="Categoria",
+        hue="LLM", style="JSON",
+        size="Prompt", sizes=(50, 300),
+        alpha=0.9,
+        ax=ax
+    )
+    ax.set_title("Promedio vs Categoria — color: LLM | estilo: JSON | tamaño: Prompt")
+    ax.set_xlim(0,5)
+    ax.set_ylim(0,5)
+    return fig
 
-g = sns.catplot(
-    data=df_final,
-    x="Categoria", y="Promedio",
-    hue="LLM",
-    col="Prompt", row="JSON",
-    kind="point",
-    dodge=True,
-    height=4, aspect=1,
-    order=ordered_cats
-)
-g.fig.subplots_adjust(top=0.92)
-g.fig.suptitle("Promedio por Categoría — dividido por Prompt y Formato (json/no_json)")
-plt.show()
+def grafico3():
+    df_agg = df_final.groupby(["LLM","Categoria"], as_index=False, observed=True)["Promedio"].mean()
+    g = sns.catplot(
+        data=df_agg,
+        x="Categoria", y="Promedio", hue="LLM",
+        kind="point", dodge=True, height=5, aspect=1.4,
+        order=ordered_cats
+    )
+    g.fig.subplots_adjust(top=0.9)
+    g.fig.suptitle("Comparación agregada: Promedio por Categoría — LLMs (incluye Expertos)")
+    g.set(ylim=(0,5))
+    return g.fig
 
-
-# ----------------- GRAFICO 2: scatter horizontal Promedio vs Categoria -----------------
-try:
-    df_final["Prompt"] = df_final["Prompt"].astype(int)
-except:
-    # si no puede convertirlo, crea una versión numérica temporal basada en categoría
-    df_final["Prompt_num"] = pd.Categorical(df_final["Prompt"]).codes + 1
-    df_final["Prompt"] = df_final["Prompt_num"]
-
-# Normalizar JSON a etiquetas legibles (si no lo hiciste ya)
-df_final["JSON"] = df_final["JSON"].map({True: "json", False: "no_json"}).fillna("no_json")
-
-# Scatterplot usando size="Prompt" y rango de tamaños
-plt.figure(figsize=(10, 6))
-sns.scatterplot(
-    data=df_final,
-    x="Promedio", y="Categoria",
-    hue="LLM", style="JSON",
-    size="Prompt", sizes=(50, 300),  # rango de tamaños (min, max)
-    alpha=0.9,
-    palette="tab10"
-)
-plt.title("Promedio vs Categoria — color: LLM | estilo: JSON | tamaño: Prompt")
-plt.xlim(left=0)
-plt.legend(bbox_to_anchor=(1.02, 1), loc='upper left', borderaxespad=0)
-plt.tight_layout()
-plt.show()
+# ----------------- Ejecutar todo ARIEL PON EL NOMBRE DE LA FUNCION AQUI-----------------
+plot_funcs = [grafico1, grafico2, grafico3]
+# save guarda el plot en png si True
+handle_plots(plot_funcs, show=True, save=False, prefix="grafico")
