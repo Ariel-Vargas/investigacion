@@ -120,31 +120,7 @@ print("\nEstadísticas generales:")
 print("Media Promedio:", df_final["Promedio"].mean())
 print("Media Expertos:", df_final["Expertos"].mean())
 
-# --- Preparación / limpieza adicional para graficar ---
-# Asegurarnos de que Categoria tenga el orden correcto
-# Añadir Expertos replicado
-ordered_cats = ["A","B","C","D","E"]
-proms = promedios_expertos.reindex(ordered_cats).fillna(np.nan)
-if not prompts_seen:
-    prompts_seen = {"0"}
-if not json_seen:
-    json_seen = {"no_json"}
 
-for p in sorted(prompts_seen, key=lambda x: int(x) if str(x).isdigit() else x):
-    for j in sorted(json_seen):
-        df_experts_rep = pd.DataFrame({
-            "Categoria": proms.index,
-            "Promedio": proms.values,
-            "Expertos": proms.values,
-            "LLM": "Expertos",
-            "Prompt": p,
-            "JSON": j
-        })
-        frames.append(df_experts_rep)
-parsed_info.append(("Expertos_replicado", "Expertos", ",".join(sorted(prompts_seen)), ",".join(sorted(json_seen))))
-
-df_final = pd.concat(frames, ignore_index=True).dropna(subset=["Promedio"]) if frames else pd.DataFrame(columns=["Categoria","Promedio","Expertos","LLM","Prompt","JSON"])
-df_final["Categoria"] = pd.Categorical(df_final["Categoria"], categories=ordered_cats, ordered=True)
 
 def safe_int_convert(col):
     try:
@@ -517,7 +493,7 @@ def catplot_flechas_llm_json_expertos():
 
     # Iterar sobre cada subplot y dibujar flechas
     for ax, (llm_name, subdf) in zip(g.axes.flat, df_cat.groupby("LLM")):
-        
+
         for json_flag, estilo in [("json", "dashed"), ("no_json", "dashed"), ("expertos", "dashed")]:
             subjson = subdf[subdf["JSON"] == json_flag]
 
