@@ -133,50 +133,6 @@ df_final["Prompt"] = safe_int_convert(df_final["Prompt"].astype(str))
 df_final["JSON"] = df_final["JSON"].fillna("no_json")
 
 # ----------------- Funciones para crear gráficos -----------------
-def grafico1():
-    g = sns.catplot(
-        data=df_final,
-        x="Categoria", y="Promedio",
-        hue="LLM",
-        col="Prompt", row="JSON",
-        kind="point",
-        dodge=True,
-        height=4, aspect=1,
-        order=ordered_cats
-    )
-    g.fig.subplots_adjust(top=0.92)
-    g.fig.suptitle("Promedio por Categoría — Prompt (col) y JSON (row)")
-    g.set(ylim=(0,5))
-    return g.fig
-
-def grafico2():
-    fig, ax = plt.subplots(figsize=(10, 6))
-    sns.scatterplot(
-        data=df_final,
-        x="Promedio", y="Categoria",
-        hue="LLM", style="JSON",
-        size="Prompt", sizes=(50, 300),
-        alpha=0.9,
-        ax=ax
-    )
-    ax.set_title("Promedio vs Categoria — color: LLM | estilo: JSON | tamaño: Prompt")
-    ax.set_xlim(0,5)
-    ax.set_ylim(0,5)
-    return fig
-
-def grafico3():
-    df_agg = df_final.groupby(["LLM","Categoria"], as_index=False, observed=True)["Promedio"].mean()
-    g = sns.catplot(
-        data=df_agg,
-        x="Categoria", y="Promedio", hue="LLM",
-        kind="point", dodge=True, height=5, aspect=1.4,
-        order=ordered_cats
-    )
-    g.fig.subplots_adjust(top=0.9)
-    g.fig.suptitle("Comparación agregada: Promedio por Categoría — LLMs (incluye Expertos)")
-    g.set(ylim=(0,5))
-    return g.fig
-
 # ----------------- FUNCIONES DE BOXPLOTS -----------------
 def boxplot_general():
     fig, ax = plt.subplots(figsize=(8,6))
@@ -251,18 +207,29 @@ def flechas_global_json():
 
     # Asegurar tipo numérico
     df_final["Promedio"] = pd.to_numeric(df_final["Promedio"], errors="coerce")
+    df_final["Expertos"] = pd.to_numeric(df_final["Expertos"], errors="coerce")
 
-    # Agrupar por Prompt y JSON → promedio global
+    # Agrupar por Prompt y JSON → promedio global (json y no_json)
     df_cat = df_final.groupby(["JSON", "Prompt"], as_index=False)["Promedio"].mean()
+
+    # Agrupar por Prompt para Expertos
+    df_expertos = df_final.groupby("Prompt", as_index=False)["Expertos"].mean()
+    df_expertos["JSON"] = "expertos"   # le damos la etiqueta de categoría
+    df_expertos = df_expertos.rename(columns={"Expertos": "Promedio"})  # para que coincida
+
+    # Unir todo en un solo DataFrame
+    df_cat = pd.concat([df_cat, df_expertos], ignore_index=True)
     df_cat["Prompt"] = df_cat["Prompt"].astype(str)
 
-    # Colores fijos para JSON y noJSON
-    colores = {"json": "tab:blue", "no_json": "tab:orange"}
+    print(df_cat)  # <-- así verás json, no_json y expertos
 
-    for json_flag, estilo in [("json", "solid"), ("no_json", "dashed")]:
+    # Colores fijos para JSON y noJSON
+    colores = {"json": "tab:blue", "no_json": "tab:orange", "expertos": "tab:green"}
+
+    for json_flag, estilo in [("json", "dashed"), ("no_json", "dashed"), ("expertos", "dashed")]:
         subjson = df_cat[df_cat["JSON"] == json_flag]
 
-        if set(subjson["Prompt"]) >= {"1", "2", "3"}:
+        if not subjson.empty and set(subjson["Prompt"]) >= {"1", "2", "3"}:
             # Ordenar por prompt
             subjson = subjson.sort_values("Prompt")
 
@@ -343,120 +310,7 @@ def flechas_llm_json(llm_name):
 
     return fig
 
-#----------------- FUNCIONES DE CATPLOTS CON FLECHAS DE TODOS LOS LLM  -----------------
-def catplot_flechas_llm_json():
-    # Asegurar tipo numérico
-    df_final["Promedio"] = pd.to_numeric(df_final["Promedio"], errors="coerce")
-
-    # Agrupar por LLM, JSON y Prompt
-    df_cat = df_final.groupby(["LLM", "JSON", "Prompt"], as_index=False)["Promedio"].mean()
-    df_cat["Prompt"] = df_cat["Prompt"].astype(int)
-
-    # Crear catplot con un subplot por cada LLM
-    g = sns.catplot(
-        data=df_cat,
-        x="Prompt", y="Promedio",
-        hue="JSON", col="LLM",
-        kind="point",
-        col_wrap=3,
-        dodge=False,
-        height=4, aspect=1.2,
-        markers="o", linestyles="dashed"
-    )
-
-    # Colores fijos para JSON y noJSON
-    colores = {"json": "tab:blue", "no_json": "tab:orange"}
-
-    # Iterar sobre cada subplot del catplot
-    for ax, (llm_name, subdf) in zip(g.axes.flat, df_cat.groupby("LLM")):
-
-        # Para cada tipo JSON dibujar línea y flechas
-        for json_flag, estilo in [("json", "dashed"), ("no_json", "dashed")]:
-            subjson = subdf[subdf["JSON"] == json_flag]
-
-            if len(subjson) > 1:
-                # Ordenar por Prompt
-                subjson = subjson.sort_values("Prompt")
-
-                # Usar el valor exacto de Prompt como X (no dodge)
-                line = ax.lines[-1]  # Última línea agregada de seaborn pointplot
-                x_vals = line.get_xdata()
-                y_vals = line.get_ydata()
-
-
-                # Dibujar línea con marcador
-                ax.plot(x_vals, y_vals, marker="o",
-                        color=colores[json_flag], linestyle=estilo,
-                        label=f"{json_flag.upper()}")
-
-                # Dibujar flechas exactas entre prompts consecutivos
-                for j in range(len(x_vals)-1):
-                    ax.annotate("",
-                        xy=(x_vals[j+1], y_vals[j+1]),
-                        xytext=(x_vals[j], y_vals[j]),
-                        arrowprops=dict(arrowstyle="->", color=colores[json_flag], lw=1.5))
-
-
-    # Ajustes de títulos
-    g.set_titles("{col_name}")
-    g.set_axis_labels("Prompt", "Promedio")
-    g.fig.subplots_adjust(top=0.85)
-    g.fig.suptitle("Evolución JSON vs NoJSON por LLM", fontsize=14)
-
-    return g.fig
-
-
-def flechas_global_json_llm(llm_list):
-    """
-    Evolución JSON vs NoJSON promediando solo sobre los LLM seleccionados.
-    
-    llm_list : list de nombres de LLM a incluir (ej: ["ChatGPT", "Deepseek", "Claude"])
-    """
-    fig, ax = plt.subplots(figsize=(8, 6))
-
-    # Filtrar por los LLM seleccionados
-    df_llm = df_final[df_final["LLM"].isin(llm_list)].copy()
-    df_llm["Promedio"] = pd.to_numeric(df_llm["Promedio"], errors="coerce")
-
-    # Agrupar por JSON y Prompt → promedio global de los LLM seleccionados
-    df_cat = df_llm.groupby(["JSON", "Prompt"], as_index=False)["Promedio"].mean()
-    df_cat["Prompt"] = df_cat["Prompt"].astype(str)
-
-    # Colores fijos
-    colores = {"json": "tab:blue", "no_json": "tab:orange"}
-
-    for json_flag, estilo in [("json", "solid"), ("no_json", "dashed")]:
-        subjson = df_cat[df_cat["JSON"] == json_flag]
-
-        if set(subjson["Prompt"]) >= {"1", "2", "3"}:
-            subjson = subjson.sort_values("Prompt")
-            x_vals = subjson["Prompt"].astype(int).values
-            y_vals = subjson["Promedio"].values
-
-            # Dibujar línea con flechas
-            ax.plot(x_vals, y_vals, marker="o",
-                    color=colores[json_flag], linestyle=estilo,
-                    label=f"{json_flag.upper()}")
-
-            # Flechas entre puntos consecutivos
-            for j in range(len(x_vals)-1):
-                ax.annotate("",
-                            xy=(x_vals[j+1], y_vals[j+1]),
-                            xytext=(x_vals[j], y_vals[j]),
-                            arrowprops=dict(arrowstyle="->", color=colores[json_flag], lw=1.5)
-                            )
-
-    # Etiquetas y estilo
-    ax.set_xlabel("Prompt")
-    ax.set_ylabel(f"Promedio Global ({', '.join(llm_list)})")
-    ax.set_title(f"Evolución JSON vs NoJSON — LLM seleccionados")
-    ax.set_xticks([1, 2, 3])
-    ax.set_xticklabels(["Prompt 1", "Prompt 2", "Prompt 3"])
-    ax.grid(alpha=0.3)
-    ax.legend()
-
-    return fig
-
+#----------------- FUNCION DE CATPLOTS CON FLECHAS DE TODOS LOS LLM  -----------------
 
 def catplot_flechas_llm_json_expertos():
     # Asegurar tipo numérico
@@ -527,17 +381,79 @@ def catplot_flechas_llm_json_expertos():
 
     return g.fig
 
+def flechas_global_llm_json(llm_list):
+    fig, ax = plt.subplots(figsize=(8, 6))
+
+    # Filtrar solo los LLM seleccionados
+    df_filtered = df_final[df_final["LLM"].isin(llm_list)].copy()
+
+    # Asegurar tipo numérico
+    df_filtered["Promedio"] = pd.to_numeric(df_filtered["Promedio"], errors="coerce")
+    df_filtered["Expertos"] = pd.to_numeric(df_filtered["Expertos"], errors="coerce")
+
+    # Agrupar por Prompt y JSON → promedio global de json/no_json
+    df_cat = df_filtered.groupby(["JSON", "Prompt"], as_index=False)["Promedio"].mean()
+
+    # Agrupar por Prompt para Expertos
+    df_expertos = df_filtered.groupby("Prompt", as_index=False)["Expertos"].mean()
+    df_expertos["JSON"] = "expertos"
+    df_expertos = df_expertos.rename(columns={"Expertos": "Promedio"})
+
+    # Unir todo en un solo DataFrame
+    df_cat = pd.concat([df_cat, df_expertos], ignore_index=True)
+    df_cat["Prompt"] = df_cat["Prompt"].astype(str)
+
+    # Colores
+    colores = {"json": "tab:blue", "no_json": "tab:orange", "expertos": "tab:green"}
+
+    markers = ["o", "s", "^"]
+
+    for json_flag, estilo in [("json", "dashed"), ("no_json", "dashed"), ("expertos", "dashed")]:
+        subjson = df_cat[df_cat["JSON"] == json_flag]
+
+        if not subjson.empty and set(subjson["Prompt"]) >= {"1", "2", "3"}:
+            subjson = subjson.sort_values("Prompt")
+
+            x_vals = subjson["Prompt"].astype(int).values
+            y_vals = subjson["Promedio"].values
+
+            # Línea
+            ax.plot(x_vals, y_vals,
+                    color=colores[json_flag], linestyle=estilo,
+                    label=f"{json_flag.upper()}")
+
+            # Poner markers distintos en cada punto
+            for i, (x, y) in enumerate(zip(x_vals, y_vals)):
+                marker = markers[i % len(markers)]  # cicla si hay más de 3 prompts
+                ax.plot(x, y, marker=marker, color=colores[json_flag])
+
+            # Flechas
+            for j in range(len(x_vals) - 1):
+                ax.annotate("",
+                    xy=(x_vals[j+1], y_vals[j+1]),
+                    xytext=(x_vals[j], y_vals[j]),
+                    arrowprops=dict(arrowstyle="->", color=colores[json_flag], lw=1.5)
+                )
+
+    # Etiquetas
+    ax.set_xlabel("Prompt")
+    ax.set_ylabel("Promedio Global")
+    ax.set_title(f"Evolución Global JSON vs NoJSON vs Expertos\nLLM: {', '.join(llm_list)}")
+    ax.set_xticks([1, 2, 3])
+    ax.set_xticklabels(["Prompt 1", "Prompt 2", "Prompt 3"])
+    ax.grid(alpha=0.3)
+    ax.legend()
+
+    return fig
 
 
 
 # ----------------- Ejecutar todo -----------------
 plot_funcs = [
     #flechas_global_json,
+    lambda: flechas_global_llm_json(["Grok", "Gemini"]),
     #lambda: flechas_llm_json("ChatGPT"),
-    #catplot_flechas_llm,
-    #catplot_flechas_llm_json, # gráfico con facetas por LLM y flechas cada uno
-    catplot_flechas_llm_json_expertos, # gráfico con facetas por LLM y flechas cada uno + expertos
-    #lambda: flechas_global_json_llm(llm_list=["ChatGPT", "Gemini", "Claude"]), # gráfico con varios LLM en el mismo plot
+    # catplot_flechas_llm_json_expertos, # gráfico con facetas por LLM y flechas cada uno + expertos
     # boxplot_general,
     # violinplot_general,
     # lambda: boxplot_por_llm("ChatGPT"),
@@ -546,7 +462,7 @@ plot_funcs = [
     # lambda: boxplot_por_llm("Meta"),
     # lambda: boxplot_por_llm("Claude"),
     # lambda: boxplot_por_llm("Grok"),
-    # boxplot_facetas
+    #boxplot_facetas
 ]
 # save guarda el plot en png si True
 handle_plots(plot_funcs, show=True, save=False, prefix="grafico")
