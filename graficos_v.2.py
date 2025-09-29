@@ -3,6 +3,9 @@ import pandas as pd  # type: ignore
 import numpy as np
 import seaborn as sns # type: ignore
 import matplotlib.pyplot as plt
+import statsmodels.api as sm # type: ignore
+from statsmodels.formula.api import ols # type: ignore
+import pingouin as pg  # type: ignore # Para ICC
 
 
 def handle_plots(plot_funcs, show=True, save=False, prefix="plot"):
@@ -451,7 +454,7 @@ def flechas_global_llm_json(llm_list):
 # ----------------- Ejecutar todo -----------------
 plot_funcs = [
     #flechas_global_json,
-    lambda: flechas_global_llm_json(["Grok", "Gemini"]),
+    #lambda: flechas_global_llm_json(["Grok", "Gemini"]),
     #lambda: flechas_llm_json("ChatGPT"),
     # catplot_flechas_llm_json_expertos, # gráfico con facetas por LLM y flechas cada uno + expertos
     # boxplot_general,
@@ -465,4 +468,135 @@ plot_funcs = [
     #boxplot_facetas
 ]
 # save guarda el plot en png si True
-handle_plots(plot_funcs, show=True, save=False, prefix="grafico")
+#handle_plots(plot_funcs, show=True, save=False, prefix="grafico")
+
+
+# ----------------- ANOVA -----------------
+# ANOVA: Comparar Promedio según LLM
+# anova_model = ols("Promedio ~ C(LLM)", data=df_final).fit()
+# anova_table = sm.stats.anova_lm(anova_model, typ=2)
+# print("=== ANOVA: Diferencias entre LLM ===")
+# print(anova_table)
+
+# # ANOVA vs Expertos: comparar cada LLM con la media de expertos
+# df_anova_exp = df_final.copy()
+# df_anova_exp["LLM_vs_Expertos"] = df_anova_exp["LLM"] + "_vs_Expertos"
+
+# # Crear una fila por experto para cada categoría
+# df_melt = pd.melt(df_anova_exp, id_vars=["Categoria", "LLM"], value_vars=["Promedio", "Expertos"],
+#                   var_name="Fuente", value_name="Valor")
+# anova_model_exp = ols("Valor ~ C(LLM) + C(Fuente)", data=df_melt).fit()
+# anova_table_exp = sm.stats.anova_lm(anova_model_exp, typ=2)
+# print("\n=== ANOVA: LLM vs Expertos ===")
+# print(anova_table_exp)
+
+# # ----------------- CORRELACIÓN INTRACLASE (ICC) -----------------
+# # ICC tipo (2,1): dos efectos aleatorios, consistencia entre LLM y Expertos
+# icc_list = []
+# categorias = df_final["Categoria"].unique()
+
+# for cat in categorias:
+#     df_cat = df_final[df_final["Categoria"] == cat].copy()
+#     # Reorganizar para pingouin
+#     df_icc = df_cat[["LLM", "Promedio", "Expertos"]].copy()
+#     # Transformar a formato largo
+#     df_icc_long = pd.melt(df_icc, id_vars="LLM", value_vars=["Promedio", "Expertos"],
+#                           var_name="Rater", value_name="Score")
+#     icc_res = pg.intraclass_corr(data=df_icc_long, targets="LLM", raters="Rater", ratings="Score")
+#     icc_val = icc_res.loc[icc_res["Type"]=="ICC2", "ICC"].values[0]
+#     icc_list.append({"Categoria": cat, "ICC2": icc_val})
+
+# icc_table = pd.DataFrame(icc_list)
+# print("\n=== Correlación Intraclase (ICC2) entre LLM y Expertos por Categoría ===")
+# print(icc_table)
+
+
+# df_chatgpt = df_final[df_final["LLM"] == "ChatGPT"].copy()
+
+# # ----------------- ANOVA ChatGPT vs Expertos -----------------
+# # Preparar DataFrame largo para ANOVA
+# df_melt = pd.melt(df_chatgpt, id_vars=["Categoria"], value_vars=["Promedio", "Expertos"],
+#                   var_name="Fuente", value_name="Valor")
+
+# anova_model_chat = ols("Valor ~ C(Fuente)", data=df_melt).fit()
+# anova_table_chat = sm.stats.anova_lm(anova_model_chat, typ=2)
+
+# print("=== ANOVA: ChatGPT vs Expertos ===")
+# print(anova_table_chat)
+
+# # ----------------- ICC ChatGPT vs Expertos -----------------
+# # Preparar DataFrame largo para ICC
+# df_icc_long = pd.melt(df_chatgpt, id_vars=["Categoria"], value_vars=["Promedio", "Expertos"],
+#                       var_name="Rater", value_name="Score")
+
+# icc_res = pg.intraclass_corr(data=df_icc_long, targets="Categoria", raters="Rater", ratings="Score")
+# icc_val = icc_res.loc[icc_res["Type"]=="ICC2", ["ICC", "CI95%"]]
+
+# print("\n=== ICC2: ChatGPT vs Expertos por Categoría ===")
+# print(icc_val)
+
+# ----------------- ANOVA por Prompt -----------------
+# prompts = sorted(df_final["Prompt"].unique())
+# anova_results = {}
+# icc_results = {}
+
+# for p in prompts:
+#     df_prompt = df_final[df_final["Prompt"] == p].copy()
+    
+#     # --- ANOVA LLM vs Expertos ---
+#     df_melt = pd.melt(df_prompt, id_vars=["Categoria"], value_vars=["Promedio", "Expertos"],
+#                       var_name="Fuente", value_name="Valor")
+    
+#     anova_model = ols("Valor ~ C(Fuente)", data=df_melt).fit()
+#     anova_table = sm.stats.anova_lm(anova_model, typ=2)
+#     anova_results[p] = anova_table
+    
+#     # --- ICC LLM vs Expertos ---
+#     df_icc_long = pd.melt(df_prompt, id_vars=["Categoria"], value_vars=["Promedio", "Expertos"],
+#                           var_name="Rater", value_name="Score")
+#     icc_res = pg.intraclass_corr(data=df_icc_long, targets="Categoria", raters="Rater", ratings="Score")
+#     icc_val = icc_res.loc[icc_res["Type"]=="ICC2", ["ICC", "CI95%"]]
+#     icc_results[p] = icc_val
+
+# # ----------------- Mostrar resultados -----------------
+# for p in prompts:
+#     print(f"\n=== ANOVA: LLM vs Expertos — Prompt {p} ===")
+#     print(anova_results[p])
+    
+#     print(f"\n=== ICC2: LLM vs Expertos — Prompt {p} ===")
+#     print(icc_results[p])
+
+
+# ----------------- ANOVA + ICC por cada LLM -----------------
+# llms = df_final["LLM"].unique()
+# anova_results = {}
+# icc_results = {}
+
+# for llm in llms:
+#     df_llm = df_final[df_final["LLM"] == llm].copy()
+    
+#     # --- ANOVA: LLM vs Expertos ---
+#     df_melt = pd.melt(df_llm, id_vars=["Categoria"], value_vars=["Promedio", "Expertos"],
+#                       var_name="Fuente", value_name="Valor")
+    
+#     anova_model = ols("Valor ~ C(Fuente)", data=df_melt).fit()
+#     anova_table = sm.stats.anova_lm(anova_model, typ=2)
+#     anova_results[llm] = anova_table
+    
+#     # --- ICC2: LLM vs Expertos ---
+#     df_icc_long = pd.melt(df_llm, id_vars=["Categoria"], value_vars=["Promedio", "Expertos"],
+#                           var_name="Rater", value_name="Score")
+    
+#     icc_res = pg.intraclass_corr(data=df_icc_long,
+#                                  targets="Categoria", raters="Rater", ratings="Score")
+    
+#     icc_val = icc_res.loc[icc_res["Type"] == "ICC2", ["ICC", "CI95%"]]
+#     icc_results[llm] = icc_val
+
+# # ----------------- Mostrar resultados -----------------
+# for llm in llms:
+#     print(f"\n=== ANOVA: {llm} vs Expertos ===")
+#     print(anova_results[llm])
+    
+#     print(f"\n=== ICC2: {llm} vs Expertos ===")
+#     print(icc_results[llm])
