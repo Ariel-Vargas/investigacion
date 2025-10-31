@@ -456,7 +456,7 @@ plot_funcs = [
     #flechas_global_json,
     #lambda: flechas_global_llm_json(["Grok", "Gemini"]),
     #lambda: flechas_llm_json("ChatGPT"),
-    # catplot_flechas_llm_json_expertos, # gráfico con facetas por LLM y flechas cada uno + expertos
+    catplot_flechas_llm_json_expertos, # gráfico con facetas por LLM y flechas cada uno + expertos
     # boxplot_general,
     # violinplot_general,
     # lambda: boxplot_por_llm("ChatGPT"),
@@ -468,7 +468,7 @@ plot_funcs = [
     #boxplot_facetas
 ]
 # save guarda el plot en png si True
-#handle_plots(plot_funcs, show=True, save=False, prefix="grafico")
+handle_plots(plot_funcs, show=True, save=False, prefix="grafico")
 
 
 # ----------------- ANOVA -----------------
