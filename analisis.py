@@ -101,27 +101,6 @@ for name in dfs_modelos.keys():
 
 df_concatenado = pd.concat(data, ignore_index=True) # DataFrame combinado de todos los modelos
 
-column_mapping = {
-    "A": "A - Estructura del discurso",
-    "B": "B - Cohesión y Coherencia",
-    "C": "C - Calidad del vocabulario y uso del Lenguaje",
-    "D": "D - Argumentación y evidencia",
-    "E": "E - Estrategias discursivas y manejo del tema"
-}
-
-df_concatenado.rename(columns=column_mapping, inplace=True)
-
-# También aplicar el cambio a todos los DataFrames individuales
-for key in dfs_modelos.keys():
-    dfs_modelos[key].rename(columns=column_mapping, inplace=True)
-
-# Y si existe df_expertos, también
-if df_expertos is not None:
-    df_expertos.rename(columns=column_mapping, inplace=True)
-
-# Si también quieres que la matriz_resultados y comparaciones usen los nuevos nombres:
-matriz_resultados.rename(columns=column_mapping, inplace=True)
-
 print("✅ DataFrame concatenado de todos los modelos:")
 print(df_concatenado.head())
 print("\nDimensiones del DataFrame concatenado:", df_concatenado.shape)
@@ -142,21 +121,13 @@ print(matriz_resultados.head())
 
 #### Análisis y visualización ####
 
-# Nombres actualizados para las columnas
-cols_descriptivas = [
-    "A - Estructura del discurso",
-    "B - Cohesión y Coherencia",
-    "C - Calidad del vocabulario y uso del Lenguaje",
-    "D - Argumentación y evidencia",
-    "E - Estrategias discursivas y manejo del tema"
-]
 # Promedio general por modelo
-promedio_modelos = matriz_resultados.groupby("Modelo")[cols_descriptivas].mean()
+promedio_modelos = matriz_resultados.groupby("Modelo")[["A", "B", "C", "D", "E"]].mean()
 
 if df_expertos is not None:
-    cols_expertos = [c for c in cols_descriptivas if c in df_expertos.columns]
+    cols_expertos = [c for c in ["A", "B", "C", "D", "E"] if c in df_expertos.columns]
     promedio_expertos = df_expertos[cols_expertos].mean().to_frame().T
-    promedio_expertos.index = ["Evaluadores \nhumanos"]
+    promedio_expertos.index = ["Evaluadores \n humanos"]
 else:
     promedio_expertos = pd.DataFrame()
 
@@ -165,14 +136,120 @@ comparacion = pd.concat([promedio_modelos, promedio_expertos])
 print("\n=== Promedio general por modelo y expertos ===")
 print(comparacion)
 
+# === Diferencia promedio entre cada modelo y los expertos ===
+if "Evaluadores \n humanos" in comparacion.index:
+    experto = comparacion.loc["Evaluadores \n humanos"]
+    
+    # Calcular la diferencia por modelo (modelo - expertos)
+    diferencias = comparacion.drop("Evaluadores \n humanos").apply(lambda row: row - experto, axis=1)
+    diferencias = diferencias.round(2)
+    print("\n=== Diferencia promedio (modelo - expertos) por categoría ===")
+    print(diferencias)
+else:
+    print("\n⚠️ No se encontró fila de expertos para calcular diferencias.")
+
+
+def plot_heatmap_diferencias():
+    """
+    Genera un heatmap que muestra la diferencia promedio entre cada modelo y los expertos
+    por categoría (A–E). Los valores positivos indican que hay una gran diferencia que
+    los expertos, y los negativos indican lo contrario.
+    """
+    if "Evaluadores \n humanos" not in comparacion.index:
+        print("⚠️ No se encontró fila de expertos para calcular diferencias.")
+        return None
+
+    experto = comparacion.loc["Evaluadores \n humanos"]
+    diferencias = comparacion.drop("Evaluadores \n humanos").apply(lambda row: row - experto, axis=1)
+    diferencias = diferencias.round(2)
+
+    # Crear figura
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    # Heatmap con mapa de color divergente (rojos negativos, azules positivos)
+    sns.heatmap(
+        diferencias,
+        annot=True,
+        fmt=".2f",
+        cmap="RdYlBu_r",  # colores de rojo (negativo) a azul (positivo)
+        center=0,
+        ax=ax
+    )
+
+    ax.set_title("Diferencia entre calificaciones LLM en base a la calificación de expertos")
+    ax.set_xlabel("Categorías")
+    ax.set_ylabel("Modelo")
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=0, ha="center")
+    ax.set_yticklabels(ax.get_yticklabels(), ha="right")
+    plt.tight_layout()
+
+    # Ajustar espacio para la leyenda lateral
+    fig.subplots_adjust(right=0.75)
+
+    # Crear eje auxiliar para la descripción de categorías
+    ax_legend = fig.add_axes([0.78, 0.2, 0.2, 0.6])
+    ax_legend.axis("off")
+
+    descripcion_categorias = {
+        "A": "Estructura del discurso",
+        "B": "Cohesión y Coherencia",
+        "C": "Calidad del vocabulario \n y uso del Lenguaje",
+        "D": "Argumentación y evidencia",
+        "E": "Estrategias discursivas \n y manejo del tema"
+    }
+
+    y_pos = 1.0
+    y_step = 0.18
+    ax_legend.text(0, y_pos + y_step * 0.5, "Categorías", fontsize=10, fontweight="bold")
+    for i, (k, v) in enumerate(descripcion_categorias.items()):
+        ax_legend.text(0, y_pos - i * y_step, f"{k} – {v}", fontsize=9, va="top")
+
+    return fig
+
 
 def plot_heatmap_promedios_generales():
-    """Genera un heatmap del promedio general de cada modelo y expertos."""
-    plt.figure(figsize=(8, 5))
-    sns.heatmap(comparacion, annot=True, fmt=".2f", cmap="YlOrBr")
-    plt.title("Promedio General por Evaluador")
-    plt.tight_layout()
-    return plt.gcf()
+    """Genera un heatmap del promedio general de cada modelo y expertos, con leyenda separada."""
+    
+    # Mantener solo letras como columnas
+    categorias_letras = ["A", "B", "C", "D", "E"]
+    df_heatmap = comparacion.copy()
+    df_heatmap.columns = categorias_letras
+
+    # Crear figura y eje principal
+    fig, ax = plt.subplots(figsize=(10, 5))
+    
+    # Heatmap
+    sns.heatmap(df_heatmap, annot=True, fmt=".2f", cmap="YlOrBr", ax=ax)
+    ax.set_title("Promedio General por Evaluador")
+    ax.set_ylabel("Modelo / Expertos")
+    ax.set_xlabel("Categorías")
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=0, ha="center")
+    ax.set_yticklabels(ax.get_yticklabels(), ha="right")
+    
+    # Ajuste de espacio a la derecha para la leyenda
+    fig.subplots_adjust(right=0.75)  # dejar 25% para la leyenda
+
+    # Crear eje auxiliar para la leyenda
+    ax_legend = fig.add_axes([0.78, 0.2, 0.2, 0.6])  # [left, bottom, width, height]
+    ax_legend.axis("off")  # eje invisible
+    
+    # Descripción de categorías
+    descripcion_categorias = {
+        "A": "Estructura del discurso",
+        "B": "Cohesión y Coherencia",
+        "C": "Calidad del vocabulario \n y uso del Lenguaje",
+        "D": "Argumentación y evidencia",
+        "E": "Estrategias discursivas \n y manejo del tema"
+    }
+
+    # Mostrar texto de la leyenda
+    y_pos = 1.0
+    y_step = 0.18
+    ax_legend.text(0, y_pos + y_step*0.5, "Categorías", fontsize=10, fontweight="bold")
+    for i, (k, v) in enumerate(descripcion_categorias.items()):
+        ax_legend.text(0, y_pos - i*y_step, f"{k} – {v}", fontsize=9, va="top")
+
+    return fig
 
 # Heatmap por prompt comparando con expertos de cada LLM
 
@@ -183,42 +260,59 @@ def plot_heatmap_prompt_vs_expertos(prompt_num):
     """
     prompt_label = f"p{prompt_num}"
     prompt_df = matriz_resultados.xs(prompt_label, level="Prompt", drop_level=False)
-    prompt_df = prompt_df[cols_descriptivas]  # aseguramos columnas correctas
+    prompt_df = prompt_df[["A", "B", "C", "D", "E"]]  # aseguramos columnas correctas
     
     # Calcular promedio de expertos
     if df_expertos is not None:
-        cols_expertos = [c for c in cols_descriptivas if c in df_expertos.columns]
+        cols_expertos = [c for c in ["A", "B", "C", "D", "E"] if c in df_expertos.columns]
         prom_expertos = df_expertos[cols_expertos].mean().to_frame().T
-        prom_expertos.index = ["Evaluadores humanos"]
+        prom_expertos.index = ["Evaluadores \n humanos"]
     else:
         print("⚠️ No se encontró hoja 'expertos'.")
         return None
 
     comparacion_prompt = pd.concat([prompt_df.droplevel("Prompt"), prom_expertos], axis=0)
 
-    # Crear etiquetas multilínea para el eje X
-    categorias_multilinea = [
-        "A - Estructura\ndel discurso",
-        "B - Cohesión\ny Coherencia",
-        "C - Calidad del\nvocabulario y uso del Lenguaje",
-        "D - Argumentación\ny evidencia",
-        "E - Estrategias\ndiscursivas y manejo del tema"
-    ]
+    # Mantener solo letras como columnas
+    categorias_letras = ["A", "B", "C", "D", "E"]
+    comparacion_prompt.columns = categorias_letras
 
-    comparacion_prompt.columns = categorias_multilinea
+    # Crear figura y ejes
+    fig, ax = plt.subplots(figsize=(12, 5))
 
-    plt.figure(figsize=(12, 6))
-    sns.heatmap(comparacion_prompt, annot=True, fmt=".2f", cmap="YlGnBu")
-    plt.title(f"Comparación Prompt {prompt_num} vs Expertos (Categorías A–E)")
-    plt.ylabel("Modelo / Expertos")
-    plt.xlabel("Categorías")
-    plt.xticks(rotation=0, ha="center")
-    plt.yticks(ha="right")
-    plt.tight_layout()
+    # Heatmap
+    sns.heatmap(comparacion_prompt, annot=True, fmt=".2f", cmap="YlGnBu", ax=ax)
+    ax.set_title(f"Análisis de las calificaciones del prompt {prompt_num} entre las calificaciones de los Evaluadores humanos")
+    ax.set_ylabel("Modelo / Expertos")
+    ax.set_xlabel("Categorías")
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=0, ha="center")
+    ax.set_yticklabels(ax.get_yticklabels(), ha="right")
 
-    return plt.gcf()
+    # Ajuste de espacio a la derecha
+    fig.subplots_adjust(right=0.75)  # dejar 25% para la leyenda
 
-# Funciones individuales para cada prompt
+    # Crear un eje auxiliar para la leyenda
+    ax_legend = fig.add_axes([0.78, 0.2, 0.2, 0.6])  # [left, bottom, width, height]
+    ax_legend.axis("off")  # eje invisible
+
+    descripcion_categorias = {
+        "A": "Estructura del discurso",
+        "B": "Cohesión y Coherencia",
+        "C": "Calidad del vocabulario \n y uso del Lenguaje",
+        "D": "Argumentación y evidencia",
+        "E": "Estrategias discursivas \n y manejo del tema"
+    }
+
+    # Mostrar texto de la leyenda
+    y_pos = 1.0
+    y_step = 0.18
+    ax_legend.text(0, y_pos + y_step*0.5, "Categorías", fontsize=10, fontweight="bold")
+    for i, (k, v) in enumerate(descripcion_categorias.items()):
+        ax_legend.text(0, y_pos - i*y_step, f"{k} – {v}", fontsize=9, va="top")
+
+    return fig
+
+    # Funciones individuales para cada prompt
 def plot_heatmap_prompt1_vs_expertos():
     return plot_heatmap_prompt_vs_expertos(1)
 
@@ -239,7 +333,7 @@ def plot_boxplot_llm_por_prompt():
     # Convertir matriz_resultados a formato largo (long format)
     df_long = matriz_resultados.reset_index().melt(
         id_vars=["Modelo", "Prompt"],
-        value_vars=cols_descriptivas,
+        value_vars=["A", "B", "C", "D", "E"],
         var_name="Categoria",
         value_name="Puntuacion"
     )
@@ -257,19 +351,166 @@ def plot_boxplot_llm_por_prompt():
     modelos = df_long["Modelo"].unique()
     for i in range(len(modelos) - 1):
         ax.axvline(x=i + 0.5, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
-    plt.title("Distribución de Puntuaciones por Modelo y Prompt")
-    plt.xlabel("Prompt")
+    plt.title("Distribución de Puntuaciones de los LLM")
+    plt.xlabel("Modelo")
     plt.ylabel("Puntuación")
     plt.legend(title="Modelo", bbox_to_anchor=(1.05, 1), loc="upper left")
     plt.tight_layout()
     return plt.gcf()
 
 
+
+# def plot_violin_chatgpt():
+#     modelo_objetivo = "chatgpt"
+    
+#     # Filtrar solo el modelo ChatGPT
+#     df_chatgpt = matriz_resultados.loc[modelo_objetivo]
+#     df_chatgpt = df_chatgpt.reset_index()  # Recuperamos "Prompt" como columna
+
+#     # Convertir a formato largo (long format)
+#     df_long = df_chatgpt.melt(
+#         id_vars=["Prompt"],
+#         value_vars=["A", "B", "C", "D", "E"],
+#         var_name="Categoria",
+#         value_name="Puntuacion"
+#     )
+
+#     # Crear el gráfico
+#     plt.figure(figsize=(10, 6))
+#     sns.violinplot(
+#         data=df_long,
+#         x="Modelo",
+#         y="Puntuacion",
+#         hue="Categoria",
+#         inner="box",   # Muestra la mediana y los cuartiles dentro del violín
+#         split=True,
+#         density_norm="width",
+#     )
+
+#     plt.title("Distribución de Puntuaciones de ChatGPT por Categoría")
+#     plt.xlabel("Categorías")
+#     plt.ylabel("Puntuación")
+#     plt.xticks(rotation=15, ha="right")
+#     plt.tight_layout()
+#     return plt.gcf()
+
+
+# def plot_cat_violin_todos_llm():
+#     """
+#     Genera un catplot (violinplot) mostrando la distribución de puntuaciones (A–E)
+#     para cada modelo LLM en paneles separados.
+#     """
+#     # Convertir la matriz de resultados a formato largo (long format)
+#     df_long = matriz_resultados.reset_index().melt(
+#         id_vars=["Modelo", "Prompt"],
+#         value_vars=["A", "B", "C", "D", "E"],
+#         var_name="Categoria",
+#         value_name="Puntuacion"
+#     )
+
+#     # Crear el gráfico tipo catplot (violinplot)
+#     g = sns.catplot(
+#         data=df_long,
+#         x="Categoria",
+#         y="Puntuacion",
+#         kind="violin",
+#         col="Modelo",            # Cada modelo en un panel distinto
+#         hue="Modelo",          # Diferenciar por modelo con colores
+#         split=True,            
+#         inner="box",             # Mostrar caja con mediana y cuartiles
+#         density_norm="width",
+#         col_wrap=3,              # Máximo 3 paneles por fila
+#         height=4,
+#     )
+
+#     g.set_titles("{col_name}")
+#     g.set_axis_labels("Categorías", "Puntuación")
+#     g.set_xticklabels(rotation=15, ha="right")
+#     g.fig.suptitle("Distribución de Puntuaciones por Categoría y Modelo (Violinplot)", y=1.03)
+#     g.tight_layout()
+#     return g.fig
+
+
+def plot_violin_llm_por_prompt():
+    """
+    Genera un violinplot mostrando la distribución de las puntuaciones (A–E)
+    para cada modelo y prompt, sin modificar 'matriz_resultados'.
+    """
+    # Crear una copia en formato largo (sin alterar el original)
+    df_long = matriz_resultados.reset_index().melt(
+        id_vars=["Modelo", "Prompt"],
+        value_vars=["A", "B", "C", "D", "E"],
+        var_name="Categoria",
+        value_name="Puntuacion"
+    )
+
+    colores = [
+        "#155DFC",  # Azul
+        "#FF5733",  # Rojo
+        "#33FF57",  # Verde
+        "#2B7FFF",  # Azul claro
+        "#FF8904",  # Naranja
+        "#7BF1A8"   # Verde menta
+    ]
+
+    plt.figure(figsize=(10, 6))
+    ax = sns.violinplot(
+        data=df_long,
+        x="Modelo",
+        y="Puntuacion",
+        hue="Prompt",
+        palette=colores,
+        split=True,
+        inner="box",
+        density_norm="width",
+        cut=0,
+        width=0.8,
+        gap=0.2
+    )
+
+    # Líneas verticales entre modelos
+    modelos = df_long["Modelo"].unique()
+    for i in range(len(modelos) - 1):
+        ax.axvline(x=i + 0.5, color="gray", linestyle="--", linewidth=0.8, alpha=0.6)
+
+    plt.title("Distribución de densidad de las puntuaciones de los LLM", pad=40)
+    plt.xlabel("Modelo")
+    plt.ylabel("Puntuación")
+    
+    #plt.legend(title="Prompt", bbox_to_anchor=(1.05, 1), loc="upper left")
+    # Obtener handles y labels
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend_.remove()  # Quitar la leyenda automática
+
+    # Crear leyenda horizontal centrada
+    legend = ax.legend(
+        handles=handles,
+        labels=labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, 1.08),
+        ncol=len(labels),
+        frameon=False,
+        fontsize=9,
+        handletextpad=0.5
+    )
+
+    fig = plt.gcf()
+    fig.text(0.23, 0.85, "Prompt:", ha="right", va="center", fontsize=10)
+
+    # Ajuste de espacio superior
+    plt.subplots_adjust(top=0.82)
+    return plt.gcf()
+
+
+
 plot_functions = [
     plot_heatmap_prompt1_vs_expertos,
     plot_heatmap_prompt2_vs_expertos,
     plot_heatmap_prompt3_vs_expertos,
-    plot_boxplot_llm_por_prompt
+    plot_heatmap_promedios_generales,
+    plot_heatmap_diferencias,
+    plot_boxplot_llm_por_prompt,
+    plot_violin_llm_por_prompt
     ]
 
 handle_plots(plot_functions, show=True, save=False, prefix="analisis_resultados")
